@@ -126,4 +126,42 @@ class VoiceService:
         entities = self.extract_entities_from_text(default_text)
         return default_text, entities
 
+    async def translate_text(self, text: str, source_lang: str = "hi", target_lang: str = "en") -> str:
+        """
+        Translates text between Indic languages (Hindi, Marathi, Kannada) and English.
+        """
+        if settings.BHASHINI_API_KEY and settings.BHASHINI_USER_ID:
+            url = "https://dhruva-api.bhashini.gov.in/services/inference/pipeline"
+            headers = {
+                "Authorization": settings.BHASHINI_API_KEY,
+                "userID": settings.BHASHINI_USER_ID,
+                "Content-Type": "application/json"
+            }
+            body = {
+                "pipelineTasks": [
+                    {
+                        "taskType": "translation",
+                        "config": {
+                            "language": {
+                                "sourceLanguage": source_lang,
+                                "targetLanguage": target_lang
+                            }
+                        }
+                    }
+                ],
+                "inputData": {
+                    "input": [{"source": text}]
+                }
+            }
+            try:
+                async with httpx.AsyncClient(timeout=12.0) as client:
+                    resp = await client.post(url, json=body, headers=headers)
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        return res_json["pipelineResponse"][0]["output"][0]["target"]
+            except Exception as e:
+                logger.warning(f"Bhashini Translation call: {e}")
+                
+        return text
+
 voice_service = VoiceService()

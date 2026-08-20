@@ -141,3 +141,13 @@ class TTSRequest(BaseModel):
 class TTSResponse(BaseModel):
     audio_base64: str
     language: str
+
+class VoiceTranslateRequest(BaseModel):
+    text: str
+    source_language: str = "hi"
+    target_language: str = "en"
+
+class VoiceTranslateResponse(BaseModel):
+    translated_text: str
+    source_language: str
+    target_language: str
