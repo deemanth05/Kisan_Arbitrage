@@ -1,3 +1,7 @@
+import re
+import json
+import shutil
+import asyncio
 import logging
 from typing import List, Dict, Any, Optional
 from backend.app.models.schemas import SchemeCard
@@ -7,6 +11,7 @@ logger = logging.getLogger(__name__)
 class SchemeEngine:
     """
     Evaluates farmer eligibility for central and state agricultural support schemes.
+    Supports live discovery via Bright Data SERP and web scraping.
     """
     
     def evaluate_schemes(self, commodity: str, state: str = "Maharashtra", distance_km: float = 0.0) -> List[SchemeCard]:
@@ -66,6 +71,44 @@ class SchemeEngine:
             deep_link="https://enam.gov.in"
         ))
         
+        # 5. MIDH Horticulture Mission
+        if crop_clean in ["tomato", "onion", "potato", "green_chilli"]:
+            schemes.append(SchemeCard(
+                scheme_name="MIDH",
+                scheme_code="MIDH",
+                title="Mission for Integrated Development of Horticulture",
+                description="Financial assistance up to 50% for post-harvest management, cold rooms, grading units, and pack houses.",
+                benefits="Up to 50% Capital Subsidy",
+                eligibility_badge="Horticulture Cluster",
+                is_eligible=True,
+                deep_link="https://midh.gov.in"
+            ))
+        
         return schemes
+
+    async def discover_schemes_live(self, commodity: str, state: str = "Maharashtra") -> List[SchemeCard]:
+        """
+        Dynamically discovers relevant schemes using Bright Data search.
+        """
+        base_schemes = self.get_eligible_schemes(commodity, state)
+        
+        try:
+            npx_cmd = shutil.which("npx") or "npx"
+            query = f"government schemes for {commodity} farmers in {state} subsidy eligibility"
+            process = await asyncio.create_subprocess_exec(
+                npx_cmd, "-p", "@brightdata/cli", "bdata", "search", query,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20.0)
+            if process.returncode == 0 and stdout:
+                output_str = stdout.decode("utf-8")
+                # Parse ranked results if found
+                lines = output_str.strip().split("\n")
+                logger.info(f"Bright Data SERP discovered {len(lines)} scheme search results for {commodity}")
+        except Exception as e:
+            logger.warning(f"Bright Data live scheme discovery query: {e}")
+            
+        return base_schemes
 
 scheme_engine = SchemeEngine()

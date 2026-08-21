@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.app.config import settings
 from backend.app.db.database import init_db
-from backend.app.routes import sessions, mandis, prices, community, voice, system
+from backend.app.routes import sessions, mandis, prices, community, voice, system, schemes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +43,7 @@ app.include_router(prices.router)
 app.include_router(community.router)
 app.include_router(voice.router)
 app.include_router(system.router)
+app.include_router(schemes.router)
 
 @app.get("/", tags=["Health"])
 async def root():

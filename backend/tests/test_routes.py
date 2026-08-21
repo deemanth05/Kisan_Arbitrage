@@ -28,6 +28,17 @@ async def test_system_status_endpoint():
         assert data["database"]["connected"] is True
 
 @pytest.mark.asyncio
+async def test_schemes_discover_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        res = await ac.get("/api/v1/schemes/discover?commodity=Tomato&state=Maharashtra")
+        assert res.status_code == 200
+        schemes = res.json()
+        assert len(schemes) >= 3
+        scheme_names = [s["scheme_name"] for s in schemes]
+        assert "PM-KISAN" in scheme_names
+        assert "PMFBY" in scheme_names
+
+@pytest.mark.asyncio
 async def test_mandis_nearby():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         res = await ac.get("/api/v1/mandis/nearby?lat=16.6913&lon=74.2432&radius=250")

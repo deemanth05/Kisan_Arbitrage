@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     BRIGHT_DATA_API_TOKEN: Optional[str] = None
     BRIGHT_DATA_WEB_UNLOCKER_ZONE: str = "cli_unlocker"
     BRIGHT_DATA_SCRAPING_BROWSER_ZONE: str = "cli_browser"
+    COLLECTOR_DIESEL_PRICES: str = "c_mt3e6r5yq1ojivj2h"
     
     # OpenRouteService
     OPEN_ROUTE_API_KEY: Optional[str] = None
