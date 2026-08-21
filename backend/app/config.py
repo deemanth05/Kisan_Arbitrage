@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     BRIGHT_DATA_SCRAPING_BROWSER_URL: Optional[str] = None
     BRIGHT_DATA_WEB_UNLOCKER_URL: Optional[str] = None
     BRIGHT_DATA_API_TOKEN: Optional[str] = None
+    BRIGHT_DATA_WEB_UNLOCKER_ZONE: str = "cli_unlocker"
+    BRIGHT_DATA_SCRAPING_BROWSER_ZONE: str = "cli_browser"
     
     # OpenRouteService
     OPEN_ROUTE_API_KEY: Optional[str] = None
