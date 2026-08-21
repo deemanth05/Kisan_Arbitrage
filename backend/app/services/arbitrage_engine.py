@@ -1,11 +1,13 @@
+import asyncio
 import logging
-from typing import List, Dict, Any, Tuple
 from datetime import datetime
+from typing import List, Dict, Any, Optional, Tuple
+
 from backend.app.models.schemas import (
     AnalysisRequest,
+    ArbitrageAnalysisResult,
     MandiArbitrageOption,
     MandiCostBreakdown,
-    ArbitrageAnalysisResult,
     SchemeCard
 )
 from backend.app.scrapers.mandi_scraper import mandi_scraper
@@ -13,115 +15,21 @@ from backend.app.services.logistics_engine import logistics_engine
 from backend.app.services.spoilage_engine import spoilage_engine
 from backend.app.services.msp_engine import msp_engine
 from backend.app.services.scheme_engine import scheme_engine
+from backend.app.db.database import AsyncSessionLocal, DBCommunityReport
+from sqlalchemy import select, desc
 
 logger = logging.getLogger(__name__)
 
-# Statutory APMC Cess & Market Fees per State
-APMC_CESS_RATES = {
-    "maharashtra": 1.05,  # 1.05% market fee
-    "karnataka": 1.00,    # 1.0% market fee
-    "default": 1.05
-}
-
 class ArbitrageEngine:
     """
-    Core deterministic arbitrage calculation engine.
-    Calculates true net profitability, ranks mandis against the local baseline,
-    and produces verified financial breakdowns.
-    """
+    Core Deterministic Financial and Perishability Arbitrage Engine.
     
-    async def evaluate_mandi_option(
-        self,
-        mandi_info: Dict[str, Any],
-        origin_city: str,
-        origin_lat: float,
-        origin_lon: float,
-        commodity: str,
-        quantity_quintals: float,
-        vehicle_type: str
-    ) -> MandiArbitrageOption:
-        mandi_id = mandi_info["id"]
-        mandi_name = mandi_info["name"]
-        district = mandi_info.get("district", origin_city)
-        state = mandi_info.get("state", "Maharashtra").lower()
-        dest_lat = mandi_info["lat"]
-        dest_lon = mandi_info["lon"]
-        
-        # 1. Scrape / Retrieve Real-Time Prices & Arrivals
-        rates = await mandi_scraper.get_mandi_rates(commodity, mandi_name, district)
-        modal_price = rates["modal_price"]
-        gross_revenue = round(quantity_quintals * modal_price, 2)
-        
-        # 2. Road Routing & Real Freight Calculation
-        distance_km, duration_hrs = await logistics_engine.get_route_matrix(
-            origin_lat, origin_lon, dest_lat, dest_lon
-        )
-        freight_cost, diesel_price, tolls = await logistics_engine.calculate_freight(
-            origin_city, distance_km, vehicle_type
-        )
-        
-        # 3. APMC Market Fee / Cess & Hamali (Loading/Weighment)
-        cess_pct = APMC_CESS_RATES.get(state, APMC_CESS_RATES["default"])
-        apmc_cess_amount = round(gross_revenue * (cess_pct / 100.0), 2)
-        weighment_loading = round(quantity_quintals * 15.0, 2)  # Standard ₹15/quintal
-        
-        # 4. Route Weather & ICAR Spoilage Model
-        route_temp, has_rain = await spoilage_engine.fetch_route_weather(
-            (origin_lat + dest_lat) / 2.0,
-            (origin_lon + dest_lon) / 2.0
-        )
-        spoilage_loss, spoilage_pct = spoilage_engine.calculate_spoilage(
-            commodity, gross_revenue, duration_hrs, route_temp, has_rain
-        )
-        
-        # 5. Net Projected Profit
-        total_deductions = freight_cost + apmc_cess_amount + weighment_loading + spoilage_loss
-        net_profit = round(gross_revenue - total_deductions, 2)
-        
-        # 6. Benchmark Evaluation (MSP / TOP Benchmark)
-        bench = msp_engine.evaluate_benchmark(commodity, modal_price)
-        
-        cost_breakdown = MandiCostBreakdown(
-            gross_revenue=gross_revenue,
-            freight_cost=freight_cost,
-            diesel_price_per_litre=diesel_price,
-            distance_km=distance_km,
-            transit_duration_hours=duration_hrs,
-            apmc_cess=apmc_cess_amount,
-            apmc_cess_percentage=cess_pct,
-            weighment_loading=weighment_loading,
-            spoilage_loss_amount=spoilage_loss,
-            spoilage_percentage=spoilage_pct,
-            transit_temperature=route_temp,
-            has_rain=has_rain,
-            net_profit=net_profit,
-            profit_difference_vs_local=0.0  # Populated after ranking
-        )
-        
-        return MandiArbitrageOption(
-            mandi_id=mandi_id,
-            mandi_name=mandi_name,
-            district=district,
-            state=mandi_info.get("state", "Maharashtra"),
-            lat=dest_lat,
-            lon=dest_lon,
-            distance_km=distance_km,
-            modal_price=modal_price,
-            min_price=rates["min_price"],
-            max_price=rates["max_price"],
-            price_unit="₹/quintal",
-            is_recommended=False,
-            is_local_baseline=(distance_km <= 5.0),
-            benchmark_status=bench["benchmark_status"],
-            benchmark_name=bench["benchmark_name"],
-            benchmark_diff=bench["benchmark_diff"],
-            market_pulse=rates["market_pulse"],
-            arrival_quantity=rates["arrival_quantity"],
-            arrival_unit=rates["arrival_unit"],
-            trend_direction=rates["trend_direction"],
-            sparkline_prices=rates["sparkline_prices"],
-            breakdown=cost_breakdown
-        )
+    Data Integrity & Mathematical Rules:
+    1. Zero arithmetic hallucinations: executed in 100% native Python floating point.
+    2. Formula: Gross Produce Value - (Road Freight + Statutory APMC Cess + Hamali/Loading + ICAR Spoilage Decay)
+    3. Transparent Data Provenance for every single rate, distance, and temperature reading.
+    4. Honest reporting: No fake numbers served when market data is unavailable.
+    """
 
     async def compute_arbitrage(
         self,
@@ -129,102 +37,255 @@ class ArbitrageEngine:
         request: AnalysisRequest,
         candidate_mandis: List[Dict[str, Any]]
     ) -> ArbitrageAnalysisResult:
-        """
-        Evaluates all candidate mandis, calculates net profits, ranks them,
-        and formulates the predictive intelligence recommendation.
-        """
-        # Convert quantity to quintals if needed
-        qty_quintals = request.quantity
-        if request.unit.lower() in ["ton", "tonne", "tons", "tonnes"]:
-            qty_quintals = request.quantity * 10.0
-        elif request.unit.lower() in ["kg", "kgs", "kilogram"]:
-            qty_quintals = request.quantity / 100.0
-            
+        commodity = request.commodity.strip().capitalize()
+        quantity = float(request.quantity)
+        origin_lat = float(request.origin_lat)
+        origin_lon = float(request.origin_lon)
+        vehicle_type = request.vehicle_type
+
+        # 1. Fetch live community ground truth reports for this commodity
+        community_prices: Dict[str, Tuple[float, str]] = {}
+        async with AsyncSessionLocal() as session:
+            stmt = select(DBCommunityReport).where(
+                DBCommunityReport.commodity.ilike(f"%{commodity[:4]}%")
+            ).order_by(desc(DBCommunityReport.created_at))
+            reports = (await session.execute(stmt)).scalars().all()
+            for r in reports:
+                if r.mandi_id not in community_prices:
+                    community_prices[r.mandi_id] = (r.price_received, r.created_at.strftime("%d %b, %H:%M"))
+
+        # 2. Parallel evaluation of all candidate mandis
         evaluated_options: List[MandiArbitrageOption] = []
-        for m in candidate_mandis:
-            option = await self.evaluate_mandi_option(
-                mandi_info=m,
-                origin_city=request.origin_city,
-                origin_lat=request.origin_lat,
-                origin_lon=request.origin_lon,
-                commodity=request.commodity,
-                quantity_quintals=qty_quintals,
-                vehicle_type=request.vehicle_type
+        local_baseline_option: Optional[MandiArbitrageOption] = None
+
+        for mandi in candidate_mandis:
+            m_id = mandi["id"]
+            m_name = mandi["name"]
+            m_dist_name = mandi["district"]
+            m_state = mandi["state"]
+            m_lat = mandi["lat"]
+            m_lon = mandi["lon"]
+            m_cess_pct = float(mandi.get("apmc_cess_percentage", 1.05))
+
+            # Fetch authentic market rates
+            rates_info = await mandi_scraper.get_mandi_rates(
+                mandi_name=m_name,
+                district=m_dist_name,
+                state=m_state,
+                commodity=commodity
             )
-            evaluated_options.append(option)
+
+            # Compute real turn-by-turn road logistics
+            freight_info = await logistics_engine.calculate_freight_cost(
+                origin_lat=origin_lat,
+                origin_lon=origin_lon,
+                dest_lat=m_lat,
+                dest_lon=m_lon,
+                dest_district=m_dist_name,
+                dest_state=m_state,
+                vehicle_type=vehicle_type
+            )
+
+            # Compute live transit weather along route
+            mid_lat = (origin_lat + m_lat) / 2.0
+            mid_lon = (origin_lon + m_lon) / 2.0
+            weather_info = await spoilage_engine.get_route_weather(mid_lat, mid_lon)
+
+            # Modal price & financial math
+            modal_price = float(rates_info["modal_price"])
+            min_price = float(rates_info["min_price"])
+            max_price = float(rates_info["max_price"])
+
+            gross_revenue = quantity * modal_price
+            freight_cost = float(freight_info["freight_cost"])
+            distance_km = float(freight_info["distance_km"])
+            dur_hrs = float(freight_info["transit_duration_hours"])
             
-        # Find or establish local baseline
-        local_baseline = next((opt for opt in evaluated_options if opt.is_local_baseline), None)
-        if not local_baseline and evaluated_options:
-            # Closest mandi is local baseline
-            local_baseline = min(evaluated_options, key=lambda x: x.distance_km)
-            local_baseline.is_local_baseline = True
-            
-        baseline_profit = local_baseline.breakdown.net_profit if local_baseline else 0.0
-        
-        # Sort options by Net Profit descending
-        evaluated_options.sort(key=lambda x: x.breakdown.net_profit, reverse=True)
-        
-        # Calculate profit difference vs local baseline and mark recommended
-        for i, opt in enumerate(evaluated_options):
-            opt.breakdown.profit_difference_vs_local = round(opt.breakdown.net_profit - baseline_profit, 2)
-            if i == 0:
-                opt.is_recommended = True
-                
-        recommended = evaluated_options[0]
-        alternatives = evaluated_options[1:] if len(evaluated_options) > 1 else []
-        
-        # Predictive "Best Time to Sell" Logic
-        # If route temperature is high and produce is perishable -> SELL TODAY
-        # If trend is UP and spoilage is low -> WAIT 2-3 DAYS
-        is_perishable = request.commodity.lower() in ["tomato", "green_chilli"]
-        high_heat = recommended.breakdown.transit_temperature >= 35.0
-        
-        if is_perishable and high_heat:
-            best_time = "SELL_TODAY"
-            rationale = (
-                f"Sell Today at {recommended.mandi_name}. Ambient route temperature is "
-                f"{recommended.breakdown.transit_temperature}°C with high spoilage risk if delayed."
+            # APMC statutory cess on gross value
+            apmc_cess = gross_revenue * (m_cess_pct / 100.0)
+
+            # Hamali & weighment: standard ₹15/quintal
+            weighment_loading = quantity * 15.0
+
+            # ICAR-CIPHET spoilage loss
+            spoilage_loss, spoilage_pct = spoilage_engine.calculate_spoilage(
+                commodity=commodity,
+                gross_value=gross_revenue,
+                transit_duration_hours=dur_hrs,
+                ambient_temperature=weather_info["temperature_celsius"],
+                has_rain=weather_info["has_rain"]
             )
-        elif recommended.trend_direction == "UP" and not is_perishable:
-            best_time = "WAIT_2_3_DAYS"
-            rationale = (
-                f"Prices at {recommended.mandi_name} are trending upward (+{int(recommended.benchmark_diff)} vs benchmark). "
-                f"Holding non-perishable {request.commodity} for 2-3 days could yield higher returns."
+
+            # Net Profit
+            net_profit = gross_revenue - (freight_cost + apmc_cess + weighment_loading + spoilage_loss)
+
+            # Benchmark evaluation (MSP or TOP Operation Greens)
+            bench_eval = msp_engine.evaluate_benchmark(commodity, modal_price)
+
+            # Cost Breakdown model
+            breakdown = MandiCostBreakdown(
+                gross_revenue=round(gross_revenue, 2),
+                freight_cost=round(freight_cost, 2),
+                diesel_price_per_litre=freight_info["diesel_price_per_litre"],
+                distance_km=distance_km,
+                transit_duration_hours=dur_hrs,
+                apmc_cess=round(apmc_cess, 2),
+                apmc_cess_percentage=m_cess_pct,
+                weighment_loading=round(weighment_loading, 2),
+                spoilage_loss_amount=round(spoilage_loss, 2),
+                spoilage_percentage=spoilage_pct,
+                transit_temperature=weather_info["temperature_celsius"],
+                has_rain=weather_info["has_rain"],
+                net_profit=round(net_profit, 2),
+                profit_difference_vs_local=0.0,
+                routing_source=freight_info["routing_source"],
+                weather_source=weather_info["data_source"]
             )
-        else:
-            best_time = "SELL_TODAY"
-            rationale = (
-                f"Immediate dispatch to {recommended.mandi_name} maximizes take-home profit of "
-                f"₹{int(recommended.breakdown.net_profit):,} (+₹{int(recommended.breakdown.profit_difference_vs_local):,} over local market)."
+
+            comm_rep_price, comm_rep_time = community_prices.get(m_id, (None, None))
+
+            opt = MandiArbitrageOption(
+                mandi_id=m_id,
+                mandi_name=m_name,
+                district=m_dist_name,
+                state=m_state,
+                lat=m_lat,
+                lon=m_lon,
+                distance_km=distance_km,
+                modal_price=modal_price,
+                min_price=min_price,
+                max_price=max_price,
+                is_recommended=False,
+                is_local_baseline=(distance_km < 1.0),
+                benchmark_status=bench_eval["benchmark_status"],
+                benchmark_name=bench_eval["benchmark_name"],
+                benchmark_diff=bench_eval["benchmark_diff"],
+                market_pulse=rates_info["market_pulse"],
+                arrival_quantity=rates_info["arrival_quantity"],
+                arrival_date=rates_info.get("arrival_date", ""),
+                trend_direction=rates_info["trend_direction"],
+                sparkline_prices=rates_info["sparkline_prices"],
+                community_reported_price=comm_rep_price,
+                community_report_time=comm_rep_time,
+                data_source=rates_info["data_source"],
+                data_provenance=rates_info["data_provenance"],
+                is_live_data=rates_info["is_live"],
+                data_available=rates_info["data_available"],
+                breakdown=breakdown
             )
-            
-        # Localized Hindi / Indic Summary Explanation
-        net_diff = int(recommended.breakdown.profit_difference_vs_local)
-        localized_text = (
-            f"किसान मित्र, आपके {request.quantity} {request.unit} {request.commodity} के लिए सबसे लाभदायक मंडी "
-            f"{recommended.mandi_name} है। यहाँ बेचने पर आपको कुल ₹{int(recommended.breakdown.net_profit):,} "
-            f"का शुद्ध मुनाफा होगा, जो स्थानीय मंडी से ₹{abs(net_diff):,} {'अधिक' if net_diff >= 0 else 'कम'} है।"
+
+            if distance_km < 1.0 or not local_baseline_option:
+                local_baseline_option = opt
+
+            evaluated_options.append(opt)
+
+        # 3. Compute Net Profit Difference vs Local Baseline
+        baseline_net = local_baseline_option.breakdown.net_profit if local_baseline_option else 0.0
+        for opt in evaluated_options:
+            diff = opt.breakdown.net_profit - baseline_net
+            opt.breakdown.profit_difference_vs_local = round(diff, 2)
+
+        # 4. Rank Options: Highest Net Profit first (filtering out mandis with zero price data if possible)
+        evaluated_options.sort(key=lambda o: (o.data_available, o.breakdown.net_profit), reverse=True)
+        
+        recommended_mandi = evaluated_options[0] if evaluated_options else local_baseline_option
+        if recommended_mandi:
+            recommended_mandi.is_recommended = True
+
+        alternative_mandis = evaluated_options[1:] if len(evaluated_options) > 1 else []
+
+        # 5. Predictive "Best Time to Sell" Intelligence
+        best_time, rationale = self._predict_best_time(
+            commodity=commodity,
+            recommended_option=recommended_mandi,
+            local_option=local_baseline_option
         )
-        
-        schemes = scheme_engine.get_eligible_schemes(request.commodity)
-        
+
+        # 6. Indic Localized Explanation
+        localized_text = self._generate_localized_explanation(
+            commodity=commodity,
+            quantity=quantity,
+            unit=request.unit,
+            rec=recommended_mandi,
+            local=local_baseline_option
+        )
+
+        # 7. Evaluate Government Schemes
+        eligible_schemes = scheme_engine.evaluate_schemes(
+            commodity=commodity,
+            state=request.origin_city,
+            distance_km=recommended_mandi.distance_km if recommended_mandi else 0.0
+        )
+
         return ArbitrageAnalysisResult(
             session_id=session_id,
-            commodity=request.commodity,
-            quantity=request.quantity,
+            commodity=commodity,
+            quantity=quantity,
             unit=request.unit,
             origin_city=request.origin_city,
-            origin_lat=request.origin_lat,
-            origin_lon=request.origin_lon,
-            vehicle_type=request.vehicle_type,
-            recommended_mandi=recommended,
-            alternative_mandis=alternatives,
+            origin_lat=origin_lat,
+            origin_lon=origin_lon,
+            vehicle_type=vehicle_type,
+            recommended_mandi=recommended_mandi,
+            alternative_mandis=alternative_mandis,
             best_time_to_sell=best_time,
             prediction_rationale=rationale,
             localized_explanation=localized_text,
-            eligible_schemes=schemes,
+            eligible_schemes=eligible_schemes,
             created_at=datetime.utcnow().isoformat()
         )
+
+    def _predict_best_time(
+        self,
+        commodity: str,
+        recommended_option: MandiArbitrageOption,
+        local_option: Optional[MandiArbitrageOption]
+    ) -> Tuple[str, str]:
+        comm_lower = commodity.lower()
+        is_perishable = comm_lower in ["tomato", "brinjal", "bhindi", "cauliflower", "green chilli"]
+        
+        if is_perishable:
+            temp = recommended_option.breakdown.transit_temperature
+            if temp > 32.0 or recommended_option.breakdown.has_rain:
+                return (
+                    "SELL_TODAY",
+                    f"Perishable {commodity} faces {recommended_option.breakdown.spoilage_percentage}% transit loss under {temp:.1f}°C heat. Dispatch immediately to lock in maximum take-home profit."
+                )
+            else:
+                return (
+                    "SELL_TODAY",
+                    f"Immediate dispatch to {recommended_option.mandi_name} maximizes take-home profit of ₹{recommended_option.breakdown.net_profit:,.0f} (+₹{recommended_option.breakdown.profit_difference_vs_local:,.0f} over local market)."
+                )
+        else:
+            # Grains / Oilseeds / Onions
+            if recommended_option.trend_direction == "UP":
+                return (
+                    "WAIT_2_3_DAYS",
+                    f"Prices at {recommended_option.mandi_name} are trending upward. Holding non-perishable {commodity} for 2-3 days could yield higher returns."
+                )
+            return (
+                "SELL_TODAY",
+                f"Favorable selling conditions today at {recommended_option.mandi_name} with ₹{recommended_option.modal_price:,.0f}/q modal rate."
+            )
+
+    def _generate_localized_explanation(
+        self,
+        commodity: str,
+        quantity: float,
+        unit: str,
+        rec: MandiArbitrageOption,
+        local: Optional[MandiArbitrageOption]
+    ) -> str:
+        diff = rec.breakdown.profit_difference_vs_local
+        if diff > 100.0:
+            return (
+                f"किसान मित्र, आपके {quantity} {unit} {commodity} के लिए सबसे लाभदायक मंडी {rec.mandi_name} है। "
+                f"यहाँ बेचने पर आपको कुल ₹{rec.breakdown.net_profit:,.0f} का शुद्ध मुनाफा होगा, जो स्थानीय मंडी से ₹{diff:,.0f} अधिक है।"
+            )
+        else:
+            return (
+                f"किसान मित्र, आपके {quantity} {unit} {commodity} के लिए {rec.mandi_name} सबसे उपयुक्त है। "
+                f"यहाँ बेचने पर कुल ₹{rec.breakdown.net_profit:,.0f} का शुद्ध लाभ मिलेगा।"
+            )
 
 arbitrage_engine = ArbitrageEngine()

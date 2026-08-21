@@ -40,6 +40,8 @@ class MandiCostBreakdown(BaseModel):
     has_rain: bool
     net_profit: float
     profit_difference_vs_local: float
+    routing_source: str = "OSRM_ROAD_ROUTING"
+    weather_source: str = "OPEN_METEO_LIVE"
 
 class MandiArbitrageOption(BaseModel):
     mandi_id: str
@@ -56,15 +58,20 @@ class MandiArbitrageOption(BaseModel):
     is_recommended: bool = False
     is_local_baseline: bool = False
     benchmark_status: str = "ABOVE_BENCHMARK"  # "ABOVE_BENCHMARK", "AT_BENCHMARK", "BELOW_BENCHMARK"
-    benchmark_name: str = "TOP Benchmark"  # "MSP" or "TOP Operation Greens"
+    benchmark_name: str = "TOP Benchmark"      # "MSP" or "TOP Operation Greens"
     benchmark_diff: float = 0.0
-    market_pulse: str = "NORMAL_SUPPLY"  # "HIGH_SUPPLY", "NORMAL_SUPPLY", "SCARCITY_HIGH_DEMAND"
+    market_pulse: str = "NORMAL_SUPPLY"       # "HIGH_SUPPLY", "NORMAL_SUPPLY", "SCARCITY_HIGH_DEMAND"
     arrival_quantity: float = 0.0
     arrival_unit: str = "Tonnes"
-    trend_direction: str = "UP"  # "UP", "DOWN", "STABLE"
+    arrival_date: str = ""
+    trend_direction: str = "UP"               # "UP", "DOWN", "STABLE"
     sparkline_prices: List[float] = Field(default_factory=list)
     community_reported_price: Optional[float] = None
     community_report_time: Optional[str] = None
+    data_source: str = "DATA_GOV_IN_API"
+    data_provenance: str = "Official Agmarknet OGD"
+    is_live_data: bool = True
+    data_available: bool = True
     breakdown: MandiCostBreakdown
 
 class SchemeCard(BaseModel):
@@ -151,3 +158,13 @@ class VoiceTranslateResponse(BaseModel):
     translated_text: str
     source_language: str
     target_language: str
+
+class SystemHealthResponse(BaseModel):
+    status: str
+    datagov_api: Dict[str, Any]
+    osrm_routing: Dict[str, Any]
+    open_meteo_weather: Dict[str, Any]
+    database: Dict[str, Any]
+    bright_data: Dict[str, Any]
+    gemini_ai: Dict[str, Any]
+    timestamp: str

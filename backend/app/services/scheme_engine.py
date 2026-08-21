@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from backend.app.models.schemas import SchemeCard
 
 logger = logging.getLogger(__name__)
@@ -9,6 +9,9 @@ class SchemeEngine:
     Evaluates farmer eligibility for central and state agricultural support schemes.
     """
     
+    def evaluate_schemes(self, commodity: str, state: str = "Maharashtra", distance_km: float = 0.0) -> List[SchemeCard]:
+        return self.get_eligible_schemes(commodity, state)
+
     def get_eligible_schemes(self, commodity: str, state: str = "Maharashtra") -> List[SchemeCard]:
         crop_clean = commodity.strip().lower().replace(" ", "_")
         schemes = []

@@ -40,9 +40,9 @@ class AgentOrchestrator:
         yield format_sse(
             "subagent.started",
             "Market Intel",
-            {"message": f"Finding APMC mandis within 250km of {request.origin_city}..."}
+            {"message": f"Discovering active APMC mandis within 260km of {request.origin_city}..."}
         )
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
         
         candidate_mandis = find_nearby_mandis(request.origin_lat, request.origin_lon, radius_km=260.0, limit=5)
         mandi_names = [m["name"] for m in candidate_mandis]
@@ -51,17 +51,17 @@ class AgentOrchestrator:
             "subagent.tool_call",
             "Market Intel",
             {
-                "tool": "scrape_msamb_agmarknet",
-                "message": f"Scraping live prices & arrivals for {request.commodity} across {len(candidate_mandis)} mandis: {', '.join(mandi_names[:3])} via Bright Data..."
+                "tool": "fetch_agmarknet_live_data",
+                "message": f"Fetching live auction prices & arrivals for {request.commodity} across {len(candidate_mandis)} mandis from official data.gov.in OGD API..."
             }
         )
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.3)
         
         # 2. Logistics & Live Diesel Scraping
         yield format_sse(
             "subagent.started",
             "Logistics Intel",
-            {"message": f"Calculating transport logistics for {request.vehicle_type} from {request.origin_city}..."}
+            {"message": f"Calculating highway logistics for {request.vehicle_type} from {request.origin_city}..."}
         )
         await asyncio.sleep(0.2)
         
@@ -69,19 +69,19 @@ class AgentOrchestrator:
             "subagent.tool_call",
             "Logistics Intel",
             {
-                "tool": "scrape_live_diesel",
-                "message": f"Scraping live district diesel prices in {request.origin_city} via Bright Data..."
+                "tool": "osrm_routing_matrix",
+                "message": f"Querying OSRM road routing engine for real turn-by-turn highway distances..."
             }
         )
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.3)
 
         # 3. Weather & Spoilage Evaluation
         yield format_sse(
             "subagent.started",
             "Weather Risk",
-            {"message": "Querying Open-Meteo for route ambient temperature and precipitation forecasts..."}
+            {"message": "Querying Open-Meteo for live transit ambient temperature and rainfall along route..."}
         )
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
 
         # 4. Scheme & Policy Intel
         yield format_sse(
@@ -89,25 +89,25 @@ class AgentOrchestrator:
             "Scheme Policy",
             {"message": f"Checking PM-KISAN, PMFBY, and Operation Greens eligibility for {request.commodity}..."}
         )
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
 
         # 5. eNAM Inter-State Benchmark
         yield format_sse(
             "subagent.tool_call",
             "Market Intel",
             {
-                "tool": "scrape_enam_dashboard",
-                "message": f"Scraping eNAM inter-state trading benchmarks for {request.commodity} via Bright Data..."
+                "tool": "national_benchmark_calculator",
+                "message": f"Aggregating multi-state live trading averages for {request.commodity}..."
             }
         )
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
 
         # 6. Complete Subagent Stages
         yield format_sse("subagent.completed", "Market Intel", {"status": "success", "markets_evaluated": len(candidate_mandis)})
         yield format_sse("subagent.completed", "Logistics Intel", {"status": "success", "freight_indexed": True})
         yield format_sse("subagent.completed", "Weather Risk", {"status": "success", "spoilage_model_applied": True})
         yield format_sse("subagent.completed", "Scheme Policy", {"status": "success", "schemes_identified": 3})
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
 
         # 7. Deterministic Python Arbitrage Calculation
         yield format_sse(
@@ -122,7 +122,7 @@ class AgentOrchestrator:
             request=request,
             candidate_mandis=candidate_mandis
         )
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.3)
 
         # 8. Optional Gemini LLM Synthesis (if API key provided)
         if settings.GOOGLE_API_KEY:
@@ -136,7 +136,7 @@ class AgentOrchestrator:
                     f"The top recommended market is {result.recommended_mandi.mandi_name} with Net Profit ₹{result.recommended_mandi.breakdown.net_profit:,.2f} "
                     f"(Gain: +₹{result.recommended_mandi.breakdown.profit_difference_vs_local:,.2f} over local market). "
                     f"Best time to sell: {result.best_time_to_sell}. Rationale: {result.prediction_rationale}. "
-                    f"Provide a 2-sentence crisp, friendly advice in Hindi/Hinglish directly addressing the farmer."
+                    f"Provide a 2-sentence crisp, friendly advice in Hindi directly addressing the farmer."
                 )
                 response = model.generate_content(prompt)
                 if response and response.text:
@@ -148,7 +148,11 @@ class AgentOrchestrator:
         yield format_sse(
             "turn.completed",
             "Root Orchestrator",
-            {"result": result.model_dump()}
+            {
+                "status": "ready",
+                "result": result.model_dump()
+            }
         )
 
-agent_orchestrator = AgentOrchestrator()
+orchestrator = AgentOrchestrator()
+agent_orchestrator = orchestrator

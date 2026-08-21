@@ -1,11 +1,4 @@
 import asyncio
-import sys
-import io
-
-# Ensure UTF-8 output encoding for console
-if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-
 from backend.app.services.arbitrage_engine import arbitrage_engine
 from backend.app.services.spoilage_engine import spoilage_engine
 from backend.app.services.logistics_engine import logistics_engine
@@ -13,9 +6,11 @@ from backend.app.services.msp_engine import msp_engine
 from backend.app.scrapers.fuel_scraper import fuel_scraper
 from backend.app.scrapers.mandi_scraper import mandi_scraper
 from backend.app.db.mandi_master import find_nearby_mandis
+from backend.app.db.database import init_db
 from backend.app.models.schemas import AnalysisRequest
 
 async def run_real_world_verification():
+    await init_db()
     print("=================================================================")
     print("      KISANARBITRAGE: REAL-WORLD GROUND TRUTH VALIDATION         ")
     print("=================================================================\n")
@@ -42,11 +37,8 @@ async def run_real_world_verification():
 
     # 3. Verify ICAR Spoilage Curves with Route Temperatures
     print("\n--- 3. ICAR POST-HARVEST SPOILAGE VERIFICATION ---")
-    # Perishable Tomato in Heat
     loss_tom_heat, pct_tom_heat = spoilage_engine.calculate_spoilage("tomato", 40000.0, 4.5, 36.0, False)
-    # Perishable Tomato in Rain
     loss_tom_rain, pct_tom_rain = spoilage_engine.calculate_spoilage("tomato", 40000.0, 4.5, 28.0, True)
-    # Non-Perishable Soybean in Heat
     loss_soy, pct_soy = spoilage_engine.calculate_spoilage("soybean", 80000.0, 4.5, 36.0, False)
 
     print(f"  • Tomato (4.5 hrs @ 36°C): Spoilage = {pct_tom_heat:.2f}% (Rs. {loss_tom_heat:.0f} loss)")
@@ -68,10 +60,10 @@ async def run_real_world_verification():
     result = await arbitrage_engine.compute_arbitrage("sess_verify_1", req, candidate_mandis)
 
     rec = result.recommended_mandi
-    print(f"\nRecommended Top Mandi: {rec.mandi_name} ({rec.distance_km:.1f} km)")
-    print(f"  • Modal Price: Rs. {rec.modal_price:.0f}/quintal")
+    print(f"\nRecommended Top Mandi: {rec.mandi_name} ({rec.distance_km:.1f} km via {rec.breakdown.routing_source})")
+    print(f"  • Modal Price: Rs. {rec.modal_price:.0f}/quintal ({rec.data_provenance})")
     print(f"  • Gross Produce Value: Rs. {rec.breakdown.gross_revenue:.0f}")
-    print(f"  • Road Freight: -Rs. {rec.breakdown.freight_cost:.0f}")
+    print(f"  • Road Freight: -Rs. {rec.breakdown.freight_cost:.0f} (Diesel @ Rs. {rec.breakdown.diesel_price_per_litre:.2f}/L)")
     print(f"  • APMC Statutory Cess ({rec.breakdown.apmc_cess_percentage}%): -Rs. {rec.breakdown.apmc_cess:.0f}")
     print(f"  • Hamali/Weighment: -Rs. {rec.breakdown.weighment_loading:.0f}")
     print(f"  • Spoilage Loss ({rec.breakdown.spoilage_percentage}% @ {rec.breakdown.transit_temperature:.1f}°C): -Rs. {rec.breakdown.spoilage_loss_amount:.0f}")

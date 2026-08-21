@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean, Index
 from backend.app.config import settings
 
 Base = declarative_base()
@@ -20,7 +20,7 @@ class DBSession(Base):
     result_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-class DBCommunityReport(Base) :
+class DBCommunityReport(Base):
     __tablename__ = "community_reports"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -32,6 +32,27 @@ class DBCommunityReport(Base) :
     farmer_name = Column(String(128), default="Kisan Mitra")
     farmer_location = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class DBMandiDailyRecord(Base):
+    __tablename__ = "mandi_daily_records"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    market_name = Column(String(128), index=True)
+    district = Column(String(128), index=True)
+    state = Column(String(64), index=True)
+    commodity = Column(String(64), index=True)
+    variety = Column(String(64), nullable=True)
+    arrival_date = Column(String(32), index=True)  # e.g., "21/08/2026"
+    min_price = Column(Float)
+    max_price = Column(Float)
+    modal_price = Column(Float)
+    arrival_quantity = Column(Float, default=0.0)
+    data_source = Column(String(64), default="DATA_GOV_IN")
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_mandi_commodity_date", "market_name", "commodity", "arrival_date"),
+    )
 
 engine = create_async_engine(settings.DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

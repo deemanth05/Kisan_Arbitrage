@@ -12,7 +12,10 @@ class Settings(BaseSettings):
     # Gemini AI
     GOOGLE_API_KEY: Optional[str] = None
     
-    # Bright Data Scraping
+    # Official Government of India Agmarknet Open Data API
+    DATA_GOV_IN_API_KEY: str = "579b464db66ec23bdd00000161f10f9e2001428979c3359cf2570ccc"
+    
+    # Bright Data Scraping (Scrape-Verse)
     BRIGHT_DATA_SCRAPING_BROWSER_URL: Optional[str] = None
     BRIGHT_DATA_WEB_UNLOCKER_URL: Optional[str] = None
     BRIGHT_DATA_API_TOKEN: Optional[str] = None
@@ -32,8 +35,6 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./kisan_arbitrage.db"
-    SUPABASE_URL: Optional[str] = None
-    SUPABASE_ANON_KEY: Optional[str] = None
     
     class Config:
         env_file = ".env"

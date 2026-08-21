@@ -1,139 +1,135 @@
-import httpx
+import math
 import logging
-from typing import Dict, Any, Tuple
+from typing import Dict, Tuple, Optional, Any
+import httpx
 
 logger = logging.getLogger(__name__)
 
-# ICAR-CIPHET Perishability Coefficients
-# Respiration and thermal decay rates per commodity class
-CROP_PERISHABILITY_PROFILES = {
+# ICAR-CIPHET Physical Crop Perishability Parameters
+CROP_PERISHABILITY_PROFILES: Dict[str, Dict[str, Any]] = {
     "tomato": {
-        "class": "HIGH_PERISHABLE",
-        "safe_temp_celsius": 24.0,
-        "base_loss_pct": 1.5,
-        "temp_decay_rate_per_hr": 0.08,  # % loss per hour per degree C above safe temp
-        "rain_decay_rate_per_hr": 0.5,
-        "max_spoilage_cap_pct": 25.0,
-    },
-    "green_chilli": {
-        "class": "HIGH_PERISHABLE",
-        "safe_temp_celsius": 26.0,
-        "base_loss_pct": 1.2,
-        "temp_decay_rate_per_hr": 0.06,
-        "rain_decay_rate_per_hr": 0.4,
-        "max_spoilage_cap_pct": 20.0,
+        "is_perishable": True,
+        "base_safe_temp": 20.0,
+        "base_loss_pct_per_hour": 0.25,
+        "heat_decay_factor": 0.08,    # accelerated rot above 25°C
+        "rain_decay_factor": 0.35,    # moisture mold acceleration
+        "max_loss_cap": 0.25          # max 25% value loss
     },
     "onion": {
-        "class": "SEMI_PERISHABLE",
-        "safe_temp_celsius": 36.0,
-        "base_loss_pct": 0.3,
-        "temp_decay_rate_per_hr": 0.015,
-        "rain_decay_rate_per_hr": 0.25,
-        "max_spoilage_cap_pct": 10.0,
+        "is_perishable": False,       # semi-perishable
+        "base_safe_temp": 28.0,
+        "base_loss_pct_per_hour": 0.04,
+        "heat_decay_factor": 0.015,
+        "rain_decay_factor": 0.20,    # rain causes rapid black mold on onion
+        "max_loss_cap": 0.12
     },
     "potato": {
-        "class": "SEMI_PERISHABLE",
-        "safe_temp_celsius": 32.0,
-        "base_loss_pct": 0.4,
-        "temp_decay_rate_per_hr": 0.02,
-        "rain_decay_rate_per_hr": 0.3,
-        "max_spoilage_cap_pct": 12.0,
+        "is_perishable": False,
+        "base_safe_temp": 25.0,
+        "base_loss_pct_per_hour": 0.03,
+        "heat_decay_factor": 0.01,
+        "rain_decay_factor": 0.15,
+        "max_loss_cap": 0.10
     },
     "soybean": {
-        "class": "NON_PERISHABLE",
-        "safe_temp_celsius": 45.0,
-        "base_loss_pct": 0.0,
-        "temp_decay_rate_per_hr": 0.0,
-        "rain_decay_rate_per_hr": 0.1,  # Rain can cause moisture damage
-        "max_spoilage_cap_pct": 5.0,
+        "is_perishable": False,       # dry grain/oilseed
+        "base_safe_temp": 38.0,
+        "base_loss_pct_per_hour": 0.0,
+        "heat_decay_factor": 0.0,
+        "rain_decay_factor": 0.05,    # only rain causes bag moisture damage
+        "max_loss_cap": 0.05
     },
     "cotton": {
-        "class": "NON_PERISHABLE",
-        "safe_temp_celsius": 45.0,
-        "base_loss_pct": 0.0,
-        "temp_decay_rate_per_hr": 0.0,
-        "rain_decay_rate_per_hr": 0.15,
-        "max_spoilage_cap_pct": 5.0,
+        "is_perishable": False,
+        "base_safe_temp": 40.0,
+        "base_loss_pct_per_hour": 0.0,
+        "heat_decay_factor": 0.0,
+        "rain_decay_factor": 0.10,    # waterlogging stains cotton fiber
+        "max_loss_cap": 0.08
     },
     "wheat": {
-        "class": "NON_PERISHABLE",
-        "safe_temp_celsius": 45.0,
-        "base_loss_pct": 0.0,
-        "temp_decay_rate_per_hr": 0.0,
-        "rain_decay_rate_per_hr": 0.1,
-        "max_spoilage_cap_pct": 5.0,
-    },
-    "maize": {
-        "class": "NON_PERISHABLE",
-        "safe_temp_celsius": 45.0,
-        "base_loss_pct": 0.0,
-        "temp_decay_rate_per_hr": 0.0,
-        "rain_decay_rate_per_hr": 0.1,
-        "max_spoilage_cap_pct": 5.0,
+        "is_perishable": False,
+        "base_safe_temp": 40.0,
+        "base_loss_pct_per_hour": 0.0,
+        "heat_decay_factor": 0.0,
+        "rain_decay_factor": 0.05,
+        "max_loss_cap": 0.05
     }
 }
 
 class SpoilageEngine:
     """
-    Calculates post-harvest transit spoilage risk using ICAR-CIPHET equations
-    and real-time route weather data from Open-Meteo.
+    Computes scientific ICAR-CIPHET post-harvest spoilage and transit degradation
+    indexed against real-time Open-Meteo route temperature and precipitation forecasts.
     """
-    
-    async def fetch_route_weather(self, lat: float, lon: float) -> Tuple[float, bool]:
+
+    async def get_route_weather(self, lat: float, lon: float) -> Dict[str, Any]:
         """
-        Queries Open-Meteo for real-time ambient temperature and precipitation.
-        No API key required.
+        Fetches live ambient temperature, humidity, and rain status from Open-Meteo.
         """
-        url = "https://api.open-meteo.com/v1/forecast"
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "current": "temperature_2m,relative_humidity_2m,precipitation,weather_code",
-            "timezone": "Asia/Kolkata"
-        }
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat:.4f}&longitude={lon:.4f}&current=temperature_2m,relative_humidity_2m,precipitation,weather_code&timezone=Asia/Kolkata"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                current = data.get("current", {})
-                temp = current.get("temperature_2m", 32.0)
-                precip = current.get("precipitation", 0.0)
-                has_rain = precip > 0.1 or current.get("weather_code", 0) in [51, 53, 55, 61, 63, 65, 80, 81, 82]
-                logger.info(f"Open-Meteo route weather at ({lat}, {lon}): {temp}°C, Rain: {has_rain}")
-                return float(temp), bool(has_rain)
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    current = data.get("current", {})
+                    temp = float(current.get("temperature_2m", 28.0))
+                    precip = float(current.get("precipitation", 0.0))
+                    humidity = float(current.get("relative_humidity_2m", 60.0))
+                    return {
+                        "temperature_celsius": temp,
+                        "precipitation_mm": precip,
+                        "humidity_pct": humidity,
+                        "has_rain": precip > 0.1,
+                        "data_source": "OPEN_METEO_LIVE"
+                    }
         except Exception as e:
-            logger.warning(f"Open-Meteo weather fetch error for ({lat}, {lon}): {e}. Using seasonal baseline.")
-            return 33.5, False
+            logger.warning(f"Open-Meteo API query error: {e}")
+
+        # Fallback to authentic seasonal average for Deccan plateau
+        return {
+            "temperature_celsius": 28.5,
+            "precipitation_mm": 0.0,
+            "humidity_pct": 65.0,
+            "has_rain": False,
+            "data_source": "SEASONAL_REGIONAL_AVERAGE"
+        }
 
     def calculate_spoilage(
         self,
         commodity: str,
         gross_value: float,
-        transit_hours: float,
-        temperature: float,
+        transit_duration_hours: float,
+        ambient_temperature: float,
         has_rain: bool
     ) -> Tuple[float, float]:
         """
-        Calculates the spoilage percentage and monetary value loss.
-        Returns: (spoilage_loss_rupees, spoilage_percentage)
+        Calculates (spoilage_loss_rupees, spoilage_percentage) based on ICAR-CIPHET physiological decay.
         """
-        crop_clean = commodity.strip().lower().replace(" ", "_")
-        profile = CROP_PERISHABILITY_PROFILES.get(crop_clean, CROP_PERISHABILITY_PROFILES["tomato"])
+        comm_clean = commodity.strip().lower()
+        profile = CROP_PERISHABILITY_PROFILES.get(comm_clean, CROP_PERISHABILITY_PROFILES["tomato"])
         
-        # If transport is under 15 mins (local mandi sale), zero transit decay
-        if transit_hours <= 0.25:
+        # Non-perishable dry crops with no rain have zero transit loss
+        if not profile["is_perishable"] and not has_rain:
             return 0.0, 0.0
-            
-        base_loss = profile["base_loss_pct"]
-        excess_temp = max(0.0, temperature - profile["safe_temp_celsius"])
-        temp_loss = excess_temp * profile["temp_decay_rate_per_hr"] * transit_hours
-        
-        rain_loss = (profile["rain_decay_rate_per_hr"] * transit_hours) if has_rain else 0.0
-        
-        total_spoilage_pct = min(base_loss + temp_loss + rain_loss, profile["max_spoilage_cap_pct"])
-        total_loss_rupees = gross_value * (total_spoilage_pct / 100.0)
-        
-        return round(total_loss_rupees, 2), round(total_spoilage_pct, 2)
+
+        # Base time decay
+        loss_pct = profile["base_loss_pct_per_hour"] * transit_duration_hours
+
+        # Thermal excess factor
+        excess_heat = max(0.0, ambient_temperature - profile["base_safe_temp"])
+        heat_decay = excess_heat * profile["heat_decay_factor"] * transit_duration_hours
+        loss_pct += heat_decay
+
+        # Moisture factor
+        if has_rain:
+            loss_pct += profile["rain_decay_factor"] * transit_duration_hours
+
+        # Cap loss percentage by physical profile limits
+        final_pct = min(loss_pct, profile["max_loss_cap"] * 100.0)
+        spoilage_rupees = gross_value * (final_pct / 100.0)
+
+        return round(spoilage_rupees, 2), round(final_pct, 2)
 
 spoilage_engine = SpoilageEngine()

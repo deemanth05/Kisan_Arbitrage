@@ -16,6 +16,18 @@ async def test_health_endpoints():
         assert res.json()["status"] == "healthy"
 
 @pytest.mark.asyncio
+async def test_system_status_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        res = await ac.get("/api/v1/system/status")
+        assert res.status_code == 200
+        data = res.json()
+        assert "status" in data
+        assert "datagov_api" in data
+        assert "osrm_routing" in data
+        assert "open_meteo_weather" in data
+        assert data["database"]["connected"] is True
+
+@pytest.mark.asyncio
 async def test_mandis_nearby():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         res = await ac.get("/api/v1/mandis/nearby?lat=16.6913&lon=74.2432&radius=250")
