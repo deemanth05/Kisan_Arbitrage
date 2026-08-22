@@ -54,6 +54,27 @@ class DBMandiDailyRecord(Base):
         Index("idx_mandi_commodity_date", "market_name", "commodity", "arrival_date"),
     )
 
+class DBSchemeRecord(Base):
+    __tablename__ = "scraped_schemes"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scheme_name = Column(String(128), index=True)
+    scheme_code = Column(String(64), index=True)
+    title = Column(String(256))
+    ministry = Column(String(256), nullable=True)
+    description = Column(Text)
+    benefits = Column(String(256))
+    eligibility_badge = Column(String(128), default="Eligible")
+    eligibility_criteria = Column(Text, nullable=True)
+    documents_required = Column(Text, nullable=True)  # JSON string
+    application_url = Column(String(512), nullable=True)
+    deep_link = Column(String(512))
+    commodity_query = Column(String(64), index=True)
+    state_query = Column(String(64), index=True)
+    data_source = Column(String(64), default="BRIGHT_DATA_DISCOVERY")
+    is_eligible = Column(Boolean, default=True)
+    scraped_at = Column(DateTime, default=datetime.utcnow)
+
 engine = create_async_engine(settings.DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

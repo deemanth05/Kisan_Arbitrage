@@ -76,13 +76,18 @@ class MandiArbitrageOption(BaseModel):
 
 class SchemeCard(BaseModel):
     scheme_name: str
-    scheme_code: str
-    title: str
-    description: str
-    benefits: str
+    scheme_code: str = ""
+    title: str = ""
+    ministry: Optional[str] = None
+    description: str = ""
+    benefits: str = ""
     eligibility_badge: str = "Eligible"
+    eligibility_criteria: Optional[str] = None
+    documents_required: List[str] = Field(default_factory=list)
+    application_url: Optional[str] = None
+    deep_link: str = ""
     is_eligible: bool = True
-    deep_link: str
+    data_source: str = "BRIGHT_DATA_DISCOVERY"
 
 class ArbitrageAnalysisResult(BaseModel):
     session_id: str

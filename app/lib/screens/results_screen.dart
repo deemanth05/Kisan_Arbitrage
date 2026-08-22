@@ -186,7 +186,7 @@ class ResultsScreen extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const SchemesScreen()),
+                  MaterialPageRoute(builder: (context) => SchemesScreen(initialCommodity: result.commodity)),
                 );
               },
               borderRadius: BorderRadius.circular(16),

@@ -158,4 +158,21 @@ class ApiService {
     }
     return {'status': 'APPROVED', 'transporter_notified': true};
   }
+
+  Future<List<SchemeCardData>> fetchDiscoveredSchemes({
+    String commodity = 'Tomato',
+    String state = 'Maharashtra',
+  }) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/v1/schemes/discover?commodity=${Uri.encodeComponent(commodity)}&state=${Uri.encodeComponent(state)}');
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data.map((e) => SchemeCardData.fromJson(e as Map<String, dynamic>)).toList();
+      }
+    } catch (e) {
+      debugPrint('Error fetching discovered schemes: $e');
+    }
+    return [];
+  }
 }

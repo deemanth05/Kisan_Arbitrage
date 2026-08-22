@@ -162,33 +162,51 @@ class SchemeCardData {
   final String schemeName;
   final String schemeCode;
   final String title;
+  final String? ministry;
   final String description;
   final String benefits;
   final String eligibilityBadge;
-  final bool isEligible;
+  final String? eligibilityCriteria;
+  final List<String> documentsRequired;
+  final String? applicationUrl;
   final String deepLink;
+  final bool isEligible;
+  final String dataSource;
 
   SchemeCardData({
     required this.schemeName,
     required this.schemeCode,
     required this.title,
+    this.ministry,
     required this.description,
     required this.benefits,
     required this.eligibilityBadge,
-    required this.isEligible,
+    this.eligibilityCriteria,
+    this.documentsRequired = const [],
+    this.applicationUrl,
     required this.deepLink,
+    required this.isEligible,
+    this.dataSource = "CENTRAL_POLICY_CATALOG",
   });
 
   factory SchemeCardData.fromJson(Map<String, dynamic> json) {
+    var rawDocs = json['documents_required'] as List<dynamic>? ?? [];
+    List<String> docs = rawDocs.map((e) => e.toString()).toList();
+
     return SchemeCardData(
       schemeName: json['scheme_name'] as String? ?? '',
       schemeCode: json['scheme_code'] as String? ?? '',
       title: json['title'] as String? ?? '',
+      ministry: json['ministry'] as String?,
       description: json['description'] as String? ?? '',
       benefits: json['benefits'] as String? ?? '',
       eligibilityBadge: json['eligibility_badge'] as String? ?? 'Eligible',
-      isEligible: json['is_eligible'] as bool? ?? true,
+      eligibilityCriteria: json['eligibility_criteria'] as String?,
+      documentsRequired: docs,
+      applicationUrl: json['application_url'] as String?,
       deepLink: json['deep_link'] as String? ?? '',
+      isEligible: json['is_eligible'] as bool? ?? true,
+      dataSource: json['data_source'] as String? ?? 'CENTRAL_POLICY_CATALOG',
     );
   }
 }
